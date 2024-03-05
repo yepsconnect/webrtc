@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WebRTC</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <video
+      id="webrtc-video"
+      autoplay
+      muted
+      playsinline
+      controls
+      style="width: 100%"
+    ></video>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        let webrtc;
+
+        function startPlay(videoEl, cameraId) {
+          if (webrtc) {
+            webrtc.close();
+          }
+
+          webrtc = new RTCPeerConnection({
+            iceServers: [
+              {
+                urls: ["stun:stun.l.google.com:19302"],
+              },
+            ],
+            sdpSemantics: "unified-plan",
+          });
+          webrtc.ontrack = function (event) {
+            console.log(event.streams.length + " track is delivered");
+            videoEl.srcObject = event.streams[0];
+            videoEl.play();
+          };
+          webrtc.addTransceiver("video", { direction: "sendrecv" });
+          webrtc.onnegotiationneeded =
+            async function handleNegotiationNeeded() {
+              const offer = await webrtc.createOffer();
+
+              await webrtc.setLocalDescription(offer);
+
+              const headers = new Headers();
+              headers.append("Authorization", "Basic " + btoa("demo:demo"));
+
+              fetch(
+                `https://office.media.boxt.one/stream/camera${cameraId}/channel/0/webrtc`,
+                {
+                  method: "POST",
+                  body: new URLSearchParams({
+                    data: btoa(webrtc.localDescription.sdp),
+                  }),
+                  headers: headers,
+                }
+              )
+                .then((response) => response.text())
+                .then((data) => {
+                  try {
+                    webrtc.setRemoteDescription(
+                      new RTCSessionDescription({
+                        type: "answer",
+                        sdp: atob(data),
+                      })
+                    );
+                  } catch (e) {
+                    console.warn(e);
+                  }
+                });
+            };
+
+          const webrtcSendChannel = webrtc.createDataChannel(
+            "rtsptowebSendChannel"
+          );
+          webrtcSendChannel.onopen = (event) => {
+            console.log(`${webrtcSendChannel.label} has opened`);
+            webrtcSendChannel.send("ping");
+          };
+          webrtcSendChannel.onclose = (_event) => {
+            console.log(`${webrtcSendChannel.label} has closed`);
+          };
+          webrtcSendChannel.onmessage = (event) => console.log(event.data);
+        }
+
+        const videoEl = document.querySelector("#webrtc-video");
+
+        // Initially start with the first camera
+        startPlay(videoEl, "577");
+      });
+    </script>
+  </body>
+</html>
